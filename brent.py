@@ -7,12 +7,12 @@ import time
 
 # --- 網頁設定 ---
 st.set_page_config(
-    page_title="金融數據分析儀表板",
+    page_title="多時間框架金融數據分析儀表板",
     layout="wide"
 )
 
 # --- 標題 ---
-st.title("💰 金融數據走勢分析儀表板 (yfinance & Streamlit)")
+st.title("💰 多時間框架數據分析儀表板")
 
 # -------------------------------------------------------------
 ## 🛠️ 數據抓取函式 (必須放在主程式邏輯調用前)
@@ -20,11 +20,11 @@ st.title("💰 金融數據走勢分析儀表板 (yfinance & Streamlit)")
 @st.cache_data(show_spinner="正在下載數據...")
 def load_data(ticker, start, end, interval, selected_interval_label):
     
-    # 顯示數據限制警告
-    if interval in ["1m", "5m", "30m"]:
+    # 顯示數據限制警告 (根據間隔動態顯示)
+    if interval in ["1m", "5m"]:
         st.info(f"⚠️ **高頻率數據限制**：選擇 **{selected_interval_label}** 時，Yahoo Finance 通常僅提供**過去約 7 個交易日**的數據。")
-    elif interval == "1h":
-        st.info(f"⚠️ **小時線數據限制**：選擇 **{selected_interval_label}** 時，Yahoo Finance 通常僅提供**過去約 60 天**的數據。")
+    elif interval in ["15m", "30m", "1h"]:
+        st.info(f"⚠️ **中頻率數據限制**：選擇 **{selected_interval_label}** 時，Yahoo Finance 通常僅提供**過去約 60 天**的數據。")
         
     try:
         # 增加延遲，提高 API 請求穩定性
@@ -59,27 +59,29 @@ st.sidebar.header("設定選項")
 # 1. 輸入金融代碼
 ticker_symbol = st.sidebar.text_input("輸入金融代碼 (例如: BZ=F, ^GSPC, 2330.TW)", "BZ=F")
 
-# 2. 選擇時間間隔
+# 2. 選擇時間間隔 (恢復多選)
 interval_options = {
-    "日線 (1d)": "1d",
-    "小時線 (1h)": "1h",
-    "30 分鐘線 (30m)": "30m",
+    "1 分鐘線 (1m)": "1m",
     "5 分鐘線 (5m)": "5m",
-    "1 分鐘線 (1m)": "1m"
+    "15 分鐘線 (15m)": "15m",
+    "30 分鐘線 (30m)": "30m",
+    "1 小時線 (1h)": "1h",
+    "日線 (1d)": "1d" # 加入日線作為穩定的選項
 }
 selected_interval_label = st.sidebar.selectbox(
     "選擇數據頻率 (時間間隔)",
     list(interval_options.keys()),
-    index=0 
+    index=5 # 預設為日線 (1d)
 )
 interval = interval_options[selected_interval_label]
 
 # 3. 自動調整日期範圍
 today = datetime.date.today()
 MAX_DAYS_MAP = {
-    "1m": 7, "5m": 7, "30m": 7, "1h": 60, "1d": 5 * 365 
+    "1m": 7, "5m": 7, "15m": 60, "30m": 60, "1h": 60, "1d": 5 * 365 
 }
-max_days = MAX_DAYS_MAP.get(interval, 5 * 365) 
+max_days = MAX_DAYS_MAP.get(interval, 5 * 365) # 根據選擇調整預設天數
+
 safe_default_start_date = today - datetime.timedelta(days=max_days)
 min_selectable_date = today - datetime.timedelta(days=max_days + 1)
 
@@ -95,10 +97,9 @@ end_date = st.sidebar.date_input("結束日期", today)
 
 
 # -------------------------------------------------------------
-## 📈 主程式邏輯與繪圖 (在所有變數設定完成後調用)
+## 📈 主程式邏輯與繪圖
 # -------------------------------------------------------------
 
-# 呼叫 load_data 函數 (現在 load_data 已經被定義)
 data_df = load_data(ticker_symbol, start_date, end_date, interval, selected_interval_label)
 
 # 視覺化與呈現
@@ -123,13 +124,13 @@ if not data_df.empty:
         st.stop()
     # 
 
-#[Image of a stock market chart showing price movement over time]
+[Image of a stock price candlestick chart showing different time intervals]
 
 
     # --- 使用 Plotly Express 繪製圖表 ---
     fig = px.line(
         df_plot,
-        x='Datetime',  # 使用標準化後的穩定名稱
+        x='Datetime',  
         y='Price',             
         title=f'{ticker_symbol} 收盤價格走勢圖',
         template='plotly_white'
