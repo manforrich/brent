@@ -27,7 +27,7 @@ def load_data(ticker, start, end, interval, selected_interval_label):
         st.info(f"⚠️ **中頻率數據限制**：選擇 **{selected_interval_label}** 時，Yahoo Finance 通常僅提供**過去約 60 天**的數據。")
         
     try:
-        # 增加延遲，提高 API 請求穩定性
+        # 新增延遲，提高 API 請求穩定性
         time.sleep(1) 
         
         data = yf.download(
@@ -59,14 +59,14 @@ st.sidebar.header("設定選項")
 # 1. 輸入金融代碼
 ticker_symbol = st.sidebar.text_input("輸入金融代碼 (例如: BZ=F, ^GSPC, 2330.TW)", "BZ=F")
 
-# 2. 選擇時間間隔 (恢復多選)
+# 2. 選擇時間間隔
 interval_options = {
     "1 分鐘線 (1m)": "1m",
     "5 分鐘線 (5m)": "5m",
     "15 分鐘線 (15m)": "15m",
     "30 分鐘線 (30m)": "30m",
     "1 小時線 (1h)": "1h",
-    "日線 (1d)": "1d" # 加入日線作為穩定的選項
+    "日線 (1d)": "1d"
 }
 selected_interval_label = st.sidebar.selectbox(
     "選擇數據頻率 (時間間隔)",
@@ -80,7 +80,7 @@ today = datetime.date.today()
 MAX_DAYS_MAP = {
     "1m": 7, "5m": 7, "15m": 60, "30m": 60, "1h": 60, "1d": 5 * 365 
 }
-max_days = MAX_DAYS_MAP.get(interval, 5 * 365) # 根據選擇調整預設天數
+max_days = MAX_DAYS_MAP.get(interval, 5 * 365) 
 
 safe_default_start_date = today - datetime.timedelta(days=max_days)
 min_selectable_date = today - datetime.timedelta(days=max_days + 1)
@@ -109,28 +109,33 @@ if not data_df.empty:
     # --- Plotly 繪圖前的數據標準化 (防止 KeyError) ---
     df_plot = data_df.reset_index() 
     
-    # 1. 確保第一個欄位 (日期/時間) 被命名為 'Datetime'
-    df_plot.columns.values[0] = 'Datetime'
+    # 步驟 1: 確定第一個欄位的名稱 (這是解決 KeyError 的關鍵)
+    date_col_name = df_plot.columns[0]
     
-    # 2. 將 Close 欄位名稱標準化為 Price
-    df_plot = df_plot.rename(columns={'Close': 'Price'})
+    # 步驟 2: 使用安全的 rename 方法，將欄位名稱標準化
+    col_mapping = {
+        date_col_name: 'Datetime',  # 安全地將第一個欄位重命名為 'Datetime'
+        'Close': 'Price'            # 將 Close 欄位重命名為 'Price'
+    }
+    df_plot = df_plot.rename(columns=col_mapping)
     
-    # 3. 移除包含 NaN 值的行，增強穩定性
+    # 步驟 3: 移除包含 NaN 值的行
     df_plot = df_plot.dropna(subset=['Price', 'Datetime'])
     
-    # 4. 最終檢查：防止數據清洗後為空
+    # 步驟 4: 最終檢查：防止數據清洗後為空
     if df_plot.empty:
         st.error("🚫 **錯誤**：數據經過清洗後已無有效數據點。請檢查日期範圍是否包含交易日。")
         st.stop()
+
     # 
 
-#[Image of a stock price candlestick chart showing different time intervals]
+[Image of a stock price candlestick chart showing different time intervals]
 
 
     # --- 使用 Plotly Express 繪製圖表 ---
     fig = px.line(
         df_plot,
-        x='Datetime',  
+        x='Datetime',  # 使用標準化後的穩定名稱
         y='Price',             
         title=f'{ticker_symbol} 收盤價格走勢圖',
         template='plotly_white'
