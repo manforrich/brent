@@ -85,30 +85,40 @@ def load_data(ticker, start, end, interval, selected_interval_label):
             end=end.strftime('%Y-%m-%d'), 
             interval=interval
         )
-        # 檢查數據是否真的抓取成功，防止返回空 DataFrame
+        
+        # 關鍵強化：檢查數據是否真的抓取成功，防止返回空 DataFrame
         if data.empty or 'Close' not in data.columns:
              st.error(f"🚫 數據載入失敗或數據為空。請檢查您的代碼 '{ticker}'、日期範圍或時間間隔設定。")
+             
+             # 如果數據抓取失敗，則清除快取，防止錯誤數據被重複使用
+             st.cache_data.clear() 
              return pd.DataFrame()
+             
+        # 確保日期索引被正確命名為 'Date' (配合 Plotly 修正)
+        if data.index.name is None:
+            data.index.name = 'Date'
+            
         return data
+        
     except Exception as e:
-        # 捕捉所有錯誤，並返回空的 DataFrame，避免後續 Plotly 報錯
         st.error(f"抓取數據時發生錯誤: {e}")
+        st.cache_data.clear() # 發生例外時，也清除快取
         return pd.DataFrame()
 
 # --- 執行數據抓取 ---
 data_df = load_data(ticker_symbol, start_date, end_date, interval, selected_interval_label)
 
 # 視覺化與呈現
+# 確保數據框不為空，防止 Plotly 拋出 ValueError
 if not data_df.empty:
     st.subheader(f"📈 {ticker_symbol} 價格走勢圖 ({selected_interval_label})")
 
     # --- 使用 Plotly Express 繪製圖表 (自動縮放效果佳) ---
-    # 繪圖前，將日期索引轉為可識別的欄位名稱
     df_plot = data_df.reset_index() 
     
     fig = px.line(
         df_plot,
-        x=df_plot.columns[0],  # X 軸為第一個欄位 (通常是 Date/Datetime)
+        x=df_plot.index.name if df_plot.index.name is not None else df_plot.columns[0],  # X 軸為日期
         y='Close',             # Y 軸為收盤價
         title=f'{ticker_symbol} 收盤價格走勢圖',
         template='plotly_white'
@@ -119,8 +129,6 @@ if not data_df.empty:
     
     # 確保 X 軸標籤清晰
     fig.update_xaxes(title_text=f"日期 / 時間 ({selected_interval_label})")
-
-    # 
 
     st.plotly_chart(fig, use_container_width=True)
 
