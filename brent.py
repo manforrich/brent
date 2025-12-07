@@ -17,8 +17,10 @@ st.title("💰 金融數據走勢分析儀表板 (yfinance & Streamlit)")
 # --- 側邊欄輸入控制項 ---
 st.sidebar.header("設定選項")
 
+# 1. 輸入金融代碼
 ticker_symbol = st.sidebar.text_input("輸入金融代碼 (例如: BZ=F, ^GSPC, 2330.TW)", "BZ=F")
 
+# 2. 選擇時間間隔
 interval_options = {
     "日線 (1d)": "1d",
     "小時線 (1h)": "1h",
@@ -69,6 +71,7 @@ def load_data(ticker, start, end, interval, selected_interval_label):
         st.info(f"⚠️ **小時線數據限制**：選擇 **{selected_interval_label}** 時，Yahoo Finance 通常僅提供**過去約 60 天**的數據。")
         
     try:
+        # 新增延遲，提高 API 請求穩定性
         time.sleep(1) 
         
         data = yf.download(
@@ -78,6 +81,7 @@ def load_data(ticker, start, end, interval, selected_interval_label):
             interval=interval
         )
         
+        # 關鍵錯誤檢查：數據為空或缺少欄位
         if data.empty or 'Close' not in data.columns:
              st.error(f"🚫 數據載入失敗或數據為空。請檢查您的代碼 '{ticker}'、日期範圍或時間間隔設定。")
              st.cache_data.clear() 
@@ -97,18 +101,26 @@ data_df = load_data(ticker_symbol, start_date, end_date, interval, selected_inte
 if not data_df.empty:
     st.subheader(f"📈 {ticker_symbol} 價格走勢圖 ({selected_interval_label})")
 
-    # --- Plotly 繪圖前的數據標準化 (關鍵修正點) ---
+    # --- Plotly 繪圖前的數據標準化 (關鍵修正點，防止 KeyError 和 ValueError) ---
     df_plot = data_df.reset_index() 
     
-    # 確保欄位名稱穩定，避免 Plotly 錯誤：將第一個欄位 (日期) 命名為 Datetime
+    # 1. 確保第一個欄位 (日期/時間) 被命名為 'Datetime'
     df_plot.columns.values[0] = 'Datetime'
     
-    # 將 Close 欄位名稱標準化為 Price
+    # 2. 將 Close 欄位名稱標準化為 Price
+    # 這裡的檢查是多餘的，因為 load_data 已經確認了 'Close' 存在
     df_plot = df_plot.rename(columns={'Close': 'Price'})
     
-    # 移除包含 NaN 值的行，增強穩定性
+    # 3. 移除包含 NaN 值的行，增強穩定性
+    # subset=['Price', 'Datetime'] 現在保證存在
     df_plot = df_plot.dropna(subset=['Price', 'Datetime'])
     
+    # 4. 最終檢查：防止數據清洗後為空
+    if df_plot.empty:
+        st.error("🚫 **錯誤**：數據經過清洗後已無有效數據點。請檢查日期範圍是否包含交易日。")
+        st.stop()
+
+
     # --- 使用 Plotly Express 繪製圖表 ---
     fig = px.line(
         df_plot,
@@ -118,6 +130,7 @@ if not data_df.empty:
         template='plotly_white'
     )
     
+    # 確保 Y 軸自動縮放並允許互動
     fig.update_yaxes(autorange=True, fixedrange=False) 
     fig.update_xaxes(title_text=f"日期 / 時間 ({selected_interval_label})")
 
@@ -130,7 +143,6 @@ if not data_df.empty:
 
     with col1:
         st.subheader("📊 原始數據 (最新 10 筆)")
-        # 這裡仍使用原始 data_df 的 Close 欄位進行展示
         st.dataframe(data_df.tail(10).style.format(precision=2))
     
     with col2:
