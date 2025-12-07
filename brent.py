@@ -33,26 +33,48 @@ selected_interval_label = st.sidebar.selectbox(
 )
 interval = interval_options[selected_interval_label]
 
-
-# 3. 選擇日期範圍
+# --- 3. 自動調整日期範圍 ---
 today = datetime.date.today()
-# 備註：yfinance 的分鐘數據有歷史長度限制，因此將預設起始日期設為近 30 天
-if interval in ["1m", "5m", "30m", "1h"]:
-    # 針對高頻率數據，將預設起始日設為近 60 天
-    default_start_date = today - datetime.timedelta(days=60)
-else:
-    # 對於日線等較低頻率數據，保留較長歷史範圍
-    default_start_date = datetime.date(2020, 1, 1)
+# 設定不同時間間隔的最大歷史限制 (yfinance 的經驗值)
+MAX_DAYS_MAP = {
+    "1m": 7,  # 分鐘線數據限制在約 7 天
+    "5m": 7,
+    "30m": 7,
+    "1h": 60, # 小時線數據限制在約 60 天
+    "1d": 5 * 365 # 日線數據預設顯示約 5 年
+}
+max_days = MAX_DAYS_MAP.get(interval, 5 * 365) # 取得安全的最大天數
 
-start_date = st.sidebar.date_input("起始日期", default_start_date)
+# 計算「安全」的預設起始日期
+safe_default_start_date = today - datetime.timedelta(days=max_days)
+# 設定日期選擇器的最小限制
+min_selectable_date = today - datetime.timedelta(days=max_days + 1)
+# 確保日線可以選擇很早的日期
+if interval == "1d":
+    min_selectable_date = datetime.date(1980, 1, 1)
+    
+# 設定起始日期輸入框
+start_date = st.sidebar.date_input(
+    "起始日期 (會依頻率自動調整預設值)",
+    value=safe_default_start_date, # 預設值會隨頻率變動
+    min_value=min_selectable_date # 限制使用者不能選取太舊的日期（針對高頻率）
+)
+
+# 設定結束日期輸入框
 end_date = st.sidebar.date_input("結束日期", today)
 
 
 # --- 數據抓取函式 (使用 Streamlit 的快取功能) ---
 @st.cache_data(show_spinner="正在從 Yahoo Finance 下載數據...")
 def load_data(ticker, start, end, interval):
-    """從 yfinance 下載數據並快取"""
-    st.info(f"注意：使用 {interval_options[selected_interval_label]} 時，Yahoo Finance 僅提供有限的歷史數據（1 分鐘線約 7 天）。")
+    """從 yfinance 下載數據並快取，並顯示數據限制警告"""
+    
+    # 針對高頻率數據顯示警告
+    if interval in ["1m", "5m", "30m"]:
+        st.info(f"⚠️ **高頻率數據限制**：選擇 **{selected_interval_label}** 時，Yahoo Finance 通常僅提供**過去約 7 個交易日**的數據。")
+    elif interval == "1h":
+        st.info(f"⚠️ **小時線數據限制**：選擇 **{selected_interval_label}** 時，Yahoo Finance 通常僅提供**過去約 60 天**的數據。")
+        
     try:
         data = yf.download(
             ticker, 
@@ -73,7 +95,7 @@ data_df = load_data(ticker_symbol, start_date, end_date, interval)
 
 # --- 網頁主要內容展示 ---
 if not data_df.empty:
-    st.subheader(f"📈 {ticker_symbol} 價格走勢圖 ({selected_interval_label} - {start_date} 至 {end_date})")
+    st.subheader(f"📈 {ticker_symbol} 價格走勢圖 ({selected_interval_label} - {data_df.index.min().strftime('%Y-%m-%d')} 至 {data_df.index.max().strftime('%Y-%m-%d')})")
 
     # 繪製收盤價折線圖
     st.line_chart(data_df['Close'])
