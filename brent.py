@@ -2,21 +2,22 @@ import streamlit as st
 import yfinance as yf
 import pandas as pd
 import datetime
+import plotly.express as px # 引入 Plotly 進行互動式繪圖
 
 # --- 網頁設定 ---
 st.set_page_config(
-    page_title="布蘭特原油走勢儀表板",
+    page_title="金融數據分析儀表板",
     layout="wide"
 )
 
 # --- 標題 ---
-st.title("⛽ 布蘭特原油 (Brent Oil) 歷史走勢分析")
+st.title("💰 金融數據走勢分析儀表板 (yfinance & Streamlit)")
 
 # --- 側邊欄輸入控制項 ---
 st.sidebar.header("設定選項")
 
-# 1. 輸入金融代碼
-ticker_symbol = st.sidebar.text_input("輸入金融代碼 (例如: BZ=F)", "BZ=F")
+# 1. 輸入金融代碼 (預設為布蘭特原油期貨)
+ticker_symbol = st.sidebar.text_input("輸入金融代碼 (例如: BZ=F, ^GSPC, 2330.TW)", "BZ=F")
 
 # 2. 選擇時間間隔
 interval_options = {
@@ -47,6 +48,7 @@ max_days = MAX_DAYS_MAP.get(interval, 5 * 365) # 取得安全的最大天數
 
 # 計算「安全」的預設起始日期
 safe_default_start_date = today - datetime.timedelta(days=max_days)
+
 # 設定日期選擇器的最小限制
 min_selectable_date = today - datetime.timedelta(days=max_days + 1)
 # 確保日線可以選擇很早的日期
@@ -65,8 +67,9 @@ end_date = st.sidebar.date_input("結束日期", today)
 
 
 # --- 數據抓取函式 (使用 Streamlit 的快取功能) ---
-@st.cache_data(show_spinner="正在從 Yahoo Finance 下載數據...")
-def load_data(ticker, start, end, interval):
+# 使用 st.cache_data 確保數據只在參數變動時才重新下載
+@st.cache_data(show_spinner=f"正在從 Yahoo Finance 下載 {ticker_symbol} 的 {selected_interval_label} 數據...")
+def load_data(ticker, start, end, interval, selected_interval_label):
     """從 yfinance 下載數據並快取，並顯示數據限制警告"""
     
     # 針對高頻率數據顯示警告
@@ -83,7 +86,7 @@ def load_data(ticker, start, end, interval):
             interval=interval
         )
         if data.empty:
-             st.error(f"錯誤：無法獲取代碼 '{ticker}' 或所選時間範圍的數據。")
+             st.error(f"錯誤：無法獲取代碼 '{ticker}' 或所選時間範圍的數據。請檢查代碼或日期範圍。")
              return pd.DataFrame()
         return data
     except Exception as e:
@@ -91,26 +94,47 @@ def load_data(ticker, start, end, interval):
         return pd.DataFrame()
 
 # --- 執行數據抓取 ---
-data_df = load_data(ticker_symbol, start_date, end_date, interval)
+data_df = load_data(ticker_symbol, start_date, end_date, interval, selected_interval_label)
 
-# --- 網頁主要內容展示 ---
+# 視覺化與呈現
 if not data_df.empty:
-    st.subheader(f"📈 {ticker_symbol} 價格走勢圖 ({selected_interval_label} - {data_df.index.min().strftime('%Y-%m-%d')} 至 {data_df.index.max().strftime('%Y-%m-%d')})")
+    st.subheader(f"📈 {ticker_symbol} 價格走勢圖 ({selected_interval_label})")
 
-    # 繪製收盤價折線圖
-    st.line_chart(data_df['Close'])
+    # --- 使用 Plotly Express 繪製圖表 (自動縮放效果佳) ---
+    fig = px.line(
+        data_df.reset_index(), # 將日期索引重設為欄位
+        x=data_df.index.name,  # X 軸為日期
+        y='Close',             # Y 軸為收盤價
+        title=f'{ticker_symbol} 收盤價格走勢圖',
+        template='plotly_white'     # 設置主題
+    )
     
-    st.subheader("📊 原始數據 (最新 10 筆)")
-    st.dataframe(data_df.tail(10))
+    # 確保 Y 軸自動縮放並允許互動
+    fig.update_yaxes(autorange=True, fixedrange=False) 
     
-    # 顯示統計摘要
-    st.subheader("📝 統計摘要")
-    st.write(data_df['Close'].describe())
+    # 確保 X 軸標籤清晰
+    fig.update_xaxes(title_text=f"日期 / 時間 ({selected_interval_label})")
+
+    st.plotly_chart(fig, use_container_width=True)
+
+    # --- 數據表格與統計 ---
+    st.markdown("---")
     
+    col1, col2 = st.columns(2)
+
+    with col1:
+        st.subheader("📊 原始數據 (最新 10 筆)")
+        # 顯示最新數據，更符合分析習慣
+        st.dataframe(data_df.tail(10).style.format(precision=2))
+    
+    with col2:
+        st.subheader("📝 統計摘要")
+        st.write(data_df['Close'].describe().to_frame().style.format(precision=2))
+        
     # 下載按鈕
     csv_data = data_df.to_csv().encode('utf-8')
     st.download_button(
-        label=f"下載 {ticker_symbol} ({selected_interval_label}) 數據為 CSV",
+        label=f"📥 下載 {ticker_symbol} ({selected_interval_label}) 數據為 CSV",
         data=csv_data,
         file_name=f'{ticker_symbol}_history_{interval}.csv',
         mime='text/csv',
