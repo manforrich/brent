@@ -7,24 +7,24 @@ import time
 
 # --- 網頁設定 ---
 st.set_page_config(
-    page_title="多時間框架金融數據分析儀表板",
+    page_title="金融數據分析儀表板 (僅 1 分鐘線)",
     layout="wide"
 )
 
 # --- 標題 ---
-st.title("💰 多時間框架數據分析儀表板")
+st.title("💰 金融數據走勢分析儀表板 (僅 1 分分鐘線)")
 
 # -------------------------------------------------------------
-## 🛠️ 數據抓取函式 (必須放在主程式邏輯調用前)
+## 🛠️ 數據抓取函式 (硬編碼為 1m)
 # -------------------------------------------------------------
-@st.cache_data(show_spinner="正在下載數據...")
+interval = "1m"
+selected_interval_label = "1 分鐘線 (1m)"
+
+@st.cache_data(show_spinner=f"正在下載 {selected_interval_label} 數據...")
 def load_data(ticker, start, end, interval, selected_interval_label):
     
-    # 顯示數據限制警告 (根據間隔動態顯示)
-    if interval in ["1m", "5m"]:
-        st.info(f"⚠️ **高頻率數據限制**：選擇 **{selected_interval_label}** 時，Yahoo Finance 通常僅提供**過去約 7 個交易日**的數據。")
-    elif interval in ["15m", "30m", "1h"]:
-        st.info(f"⚠️ **中頻率數據限制**：選擇 **{selected_interval_label}** 時，Yahoo Finance 通常僅提供**過去約 60 天**的數據。")
+    # 顯示數據限制警告 (針對 1 分鐘線)
+    st.info(f"⚠️ **高頻率數據限制**：本應用程式僅提供 **{selected_interval_label}** 數據，Yahoo Finance 通常僅提供**過去約 7 個交易日**的數據。")
         
     try:
         # 新增延遲，提高 API 請求穩定性
@@ -39,7 +39,7 @@ def load_data(ticker, start, end, interval, selected_interval_label):
         
         # 關鍵錯誤檢查：數據為空或缺少欄位
         if data.empty or 'Close' not in data.columns:
-             st.error(f"🚫 數據載入失敗或數據為空。請檢查您的代碼 '{ticker}'、日期範圍或時間間隔設定。")
+             st.error(f"🚫 數據載入失敗或數據為空。請檢查您的代碼 '{ticker}' 或日期範圍設定。")
              st.cache_data.clear() 
              return pd.DataFrame()
              
@@ -59,37 +59,17 @@ st.sidebar.header("設定選項")
 # 1. 輸入金融代碼
 ticker_symbol = st.sidebar.text_input("輸入金融代碼 (例如: BZ=F, ^GSPC, 2330.TW)", "BZ=F")
 
-# 2. 選擇時間間隔
-interval_options = {
-    "1 分鐘線 (1m)": "1m",
-    "5 分鐘線 (5m)": "5m",
-    "15 分鐘線 (15m)": "15m",
-    "30 分鐘線 (30m)": "30m",
-    "1 小時線 (1h)": "1h",
-    "日線 (1d)": "1d"
-}
-selected_interval_label = st.sidebar.selectbox(
-    "選擇數據頻率 (時間間隔)",
-    list(interval_options.keys()),
-    index=5 # 預設為日線 (1d)
-)
-interval = interval_options[selected_interval_label]
+# 2. 顯示固定時間間隔
+st.sidebar.metric("數據頻率", selected_interval_label)
 
-# 3. 自動調整日期範圍
+# 3. 自動調整日期範圍 (強制限制在 7 天內)
 today = datetime.date.today()
-MAX_DAYS_MAP = {
-    "1m": 7, "5m": 7, "15m": 60, "30m": 60, "1h": 60, "1d": 5 * 365 
-}
-max_days = MAX_DAYS_MAP.get(interval, 5 * 365) 
-
-safe_default_start_date = today - datetime.timedelta(days=max_days)
-min_selectable_date = today - datetime.timedelta(days=max_days + 1)
-
-if interval == "1d":
-    min_selectable_date = datetime.date(1980, 1, 1)
+MAX_DAYS = 7 # 1分鐘線最大天數
+safe_default_start_date = today - datetime.timedelta(days=MAX_DAYS)
+min_selectable_date = today - datetime.timedelta(days=MAX_DAYS + 1)
     
 start_date = st.sidebar.date_input(
-    "起始日期 (會依頻率自動調整預設值)",
+    "起始日期 (限於 7 天內)",
     value=safe_default_start_date, 
     min_value=min_selectable_date 
 )
@@ -109,28 +89,23 @@ if not data_df.empty:
     # --- Plotly 繪圖前的數據標準化 (防止 KeyError) ---
     df_plot = data_df.reset_index() 
     
-    # 步驟 1: 確定第一個欄位的名稱 (這是解決 KeyError 的關鍵)
+    # 1. 確定第一個欄位的名稱
     date_col_name = df_plot.columns[0]
     
-    # 步驟 2: 使用安全的 rename 方法，將欄位名稱標準化
+    # 2. 使用安全的 rename 方法，將欄位名稱標準化
     col_mapping = {
-        date_col_name: 'Datetime',  # 安全地將第一個欄位重命名為 'Datetime'
-        'Close': 'Price'            # 將 Close 欄位重命名為 'Price'
+        date_col_name: 'Datetime',  
+        'Close': 'Price'            
     }
     df_plot = df_plot.rename(columns=col_mapping)
     
-    # 步驟 3: 移除包含 NaN 值的行
+    # 3. 移除包含 NaN 值的行，增強穩定性
     df_plot = df_plot.dropna(subset=['Price', 'Datetime'])
     
-    # 步驟 4: 最終檢查：防止數據清洗後為空
+    # 4. 最終檢查：防止數據清洗後為空
     if df_plot.empty:
         st.error("🚫 **錯誤**：數據經過清洗後已無有效數據點。請檢查日期範圍是否包含交易日。")
         st.stop()
-
-    # 
-
-#[Image of a stock price candlestick chart showing different time intervals]
-
 
     # --- 使用 Plotly Express 繪製圖表 ---
     fig = px.line(
