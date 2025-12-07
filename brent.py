@@ -3,6 +3,7 @@ import yfinance as yf
 import pandas as pd
 import datetime
 import plotly.express as px 
+import time # 新增 time 函式庫用於穩定 API 請求
 
 # --- 網頁設定 ---
 st.set_page_config(
@@ -37,10 +38,10 @@ interval = interval_options[selected_interval_label]
 # --- 3. 自動調整日期範圍 ---
 today = datetime.date.today()
 MAX_DAYS_MAP = {
-    "1m": 7,  # 分鐘線數據限制在約 7 天
+    "1m": 7,  
     "5m": 7,
     "30m": 7,
-    "1h": 60, # 小時線數據限制在約 60 天
+    "1h": 60, 
     "1d": 5 * 365 
 }
 max_days = MAX_DAYS_MAP.get(interval, 5 * 365) 
@@ -70,6 +71,9 @@ def load_data(ticker, start, end, interval, selected_interval_label):
         st.info(f"⚠️ **小時線數據限制**：選擇 **{selected_interval_label}** 時，Yahoo Finance 通常僅提供**過去約 60 天**的數據。")
         
     try:
+        # 新增延遲，提高 API 請求穩定性
+        time.sleep(1) 
+        
         data = yf.download(
             ticker, 
             start=start.strftime('%Y-%m-%d'), 
@@ -77,12 +81,13 @@ def load_data(ticker, start, end, interval, selected_interval_label):
             interval=interval
         )
         
+        # 關鍵錯誤檢查：數據為空或缺少欄位
         if data.empty or 'Close' not in data.columns:
              st.error(f"🚫 數據載入失敗或數據為空。請檢查您的代碼 '{ticker}'、日期範圍或時間間隔設定。")
              st.cache_data.clear() 
              return pd.DataFrame()
              
-        # 移除手動設置索引名稱的程式碼，信任 reset_index() 的行為
+        # 數據結構良好，直接返回
         return data
         
     except Exception as e:
@@ -98,17 +103,18 @@ if not data_df.empty:
     st.subheader(f"📈 {ticker_symbol} 價格走勢圖 ({selected_interval_label})")
 
     # --- 使用 Plotly Express 繪製圖表 ---
+    # 將日期索引重設為欄位，默認名稱為 'Date'
     df_plot = data_df.reset_index() 
     
-    # 關鍵修正：將 x 軸名稱明確指定為 'Date' (reset_index() 的預設欄位名稱)
     fig = px.line(
         df_plot,
-        x='Date',  # 直接使用 'Date' 欄位名稱
+        x='Date',  # 直接使用 'Date' 欄位名稱，提高 Plotly 穩定性
         y='Close',             
         title=f'{ticker_symbol} 收盤價格走勢圖',
         template='plotly_white'
     )
     
+    # 確保 Y 軸自動縮放並允許互動
     fig.update_yaxes(autorange=True, fixedrange=False) 
     fig.update_xaxes(title_text=f"日期 / 時間 ({selected_interval_label})")
 
