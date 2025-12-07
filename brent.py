@@ -5,35 +5,125 @@ import datetime
 import plotly.express as px 
 import time 
 
-# ... (程式碼開頭不變) ...
+# --- 網頁設定 ---
+st.set_page_config(
+    page_title="金融數據分析儀表板",
+    layout="wide"
+)
 
-# --- 執行數據抓取 ---
+# --- 標題 ---
+st.title("💰 金融數據走勢分析儀表板 (yfinance & Streamlit)")
+
+# -------------------------------------------------------------
+## 🛠️ 數據抓取函式 (必須放在主程式邏輯調用前)
+# -------------------------------------------------------------
+@st.cache_data(show_spinner="正在下載數據...")
+def load_data(ticker, start, end, interval, selected_interval_label):
+    
+    # 顯示數據限制警告
+    if interval in ["1m", "5m", "30m"]:
+        st.info(f"⚠️ **高頻率數據限制**：選擇 **{selected_interval_label}** 時，Yahoo Finance 通常僅提供**過去約 7 個交易日**的數據。")
+    elif interval == "1h":
+        st.info(f"⚠️ **小時線數據限制**：選擇 **{selected_interval_label}** 時，Yahoo Finance 通常僅提供**過去約 60 天**的數據。")
+        
+    try:
+        # 增加延遲，提高 API 請求穩定性
+        time.sleep(1) 
+        
+        data = yf.download(
+            ticker, 
+            start=start.strftime('%Y-%m-%d'), 
+            end=end.strftime('%Y-%m-%d'), 
+            interval=interval
+        )
+        
+        # 關鍵錯誤檢查：數據為空或缺少欄位
+        if data.empty or 'Close' not in data.columns:
+             st.error(f"🚫 數據載入失敗或數據為空。請檢查您的代碼 '{ticker}'、日期範圍或時間間隔設定。")
+             st.cache_data.clear() 
+             return pd.DataFrame()
+             
+        return data
+        
+    except Exception as e:
+        st.error(f"抓取數據時發生錯誤: {e}")
+        st.cache_data.clear() 
+        return pd.DataFrame()
+
+# -------------------------------------------------------------
+## ⚙️ 輸入控制項與變數設定
+# -------------------------------------------------------------
+
+st.sidebar.header("設定選項")
+
+# 1. 輸入金融代碼
+ticker_symbol = st.sidebar.text_input("輸入金融代碼 (例如: BZ=F, ^GSPC, 2330.TW)", "BZ=F")
+
+# 2. 選擇時間間隔
+interval_options = {
+    "日線 (1d)": "1d",
+    "小時線 (1h)": "1h",
+    "30 分鐘線 (30m)": "30m",
+    "5 分鐘線 (5m)": "5m",
+    "1 分鐘線 (1m)": "1m"
+}
+selected_interval_label = st.sidebar.selectbox(
+    "選擇數據頻率 (時間間隔)",
+    list(interval_options.keys()),
+    index=0 
+)
+interval = interval_options[selected_interval_label]
+
+# 3. 自動調整日期範圍
+today = datetime.date.today()
+MAX_DAYS_MAP = {
+    "1m": 7, "5m": 7, "30m": 7, "1h": 60, "1d": 5 * 365 
+}
+max_days = MAX_DAYS_MAP.get(interval, 5 * 365) 
+safe_default_start_date = today - datetime.timedelta(days=max_days)
+min_selectable_date = today - datetime.timedelta(days=max_days + 1)
+
+if interval == "1d":
+    min_selectable_date = datetime.date(1980, 1, 1)
+    
+start_date = st.sidebar.date_input(
+    "起始日期 (會依頻率自動調整預設值)",
+    value=safe_default_start_date, 
+    min_value=min_selectable_date 
+)
+end_date = st.sidebar.date_input("結束日期", today)
+
+
+# -------------------------------------------------------------
+## 📈 主程式邏輯與繪圖 (在所有變數設定完成後調用)
+# -------------------------------------------------------------
+
+# 呼叫 load_data 函數 (現在 load_data 已經被定義)
 data_df = load_data(ticker_symbol, start_date, end_date, interval, selected_interval_label)
 
 # 視覺化與呈現
 if not data_df.empty:
     st.subheader(f"📈 {ticker_symbol} 價格走勢圖 ({selected_interval_label})")
 
-    # --- Plotly 繪圖前的數據標準化 (最終穩定修正，避免 KeyError) ---
+    # --- Plotly 繪圖前的數據標準化 (防止 KeyError) ---
     df_plot = data_df.reset_index() 
     
-    # 步驟 1: 確定第一個欄位的名稱 (它可能是 'Date' 或 'index')
-    date_col_name = df_plot.columns[0]
+    # 1. 確保第一個欄位 (日期/時間) 被命名為 'Datetime'
+    df_plot.columns.values[0] = 'Datetime'
     
-    # 步驟 2: 使用安全的 rename 方法，將日期欄位和 Close 欄位重命名
-    df_plot = df_plot.rename(columns={
-        date_col_name: 'Datetime',  # 安全地將第一個欄位重命名為 'Datetime'
-        'Close': 'Price'            # 將 Close 欄位重命名為 'Price'
-    })
+    # 2. 將 Close 欄位名稱標準化為 Price
+    df_plot = df_plot.rename(columns={'Close': 'Price'})
     
-    # 步驟 3: 移除包含 NaN 值的行 (現在 'Price' 和 'Datetime' 肯定存在)
-    # 這是發生錯誤的行，但現在欄位名稱已經被保證
+    # 3. 移除包含 NaN 值的行，增強穩定性
     df_plot = df_plot.dropna(subset=['Price', 'Datetime'])
     
-    # 步驟 4: 最終檢查：防止數據清洗後為空
+    # 4. 最終檢查：防止數據清洗後為空
     if df_plot.empty:
         st.error("🚫 **錯誤**：數據經過清洗後已無有效數據點。請檢查日期範圍是否包含交易日。")
         st.stop()
+    # 
+
+[Image of a stock market chart showing price movement over time]
 
 
     # --- 使用 Plotly Express 繪製圖表 ---
@@ -44,8 +134,6 @@ if not data_df.empty:
         title=f'{ticker_symbol} 收盤價格走勢圖',
         template='plotly_white'
     )
-    
-    # ... (繪圖與數據呈現程式碼不變) ...
     
     fig.update_yaxes(autorange=True, fixedrange=False) 
     fig.update_xaxes(title_text=f"日期 / 時間 ({selected_interval_label})")
