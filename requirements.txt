@@ -1,11 +1,4 @@
-certifi==2024.2.2
-charset-normalizer==3.3.2
-filelock==3.13.1
-idna==3.6
-matplotlib==3.8.2
-numpy==1.26.3
-pandas==2.2.0
-pydeck==0.8.1
-streamlit==1.30.0
-# ... 以及更多依賴項
-yfinance==0.2.36
+yfinance
+pandas
+streamlit
+matplotlib
