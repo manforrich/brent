@@ -27,7 +27,6 @@ def load_data(ticker, start, end, interval, selected_interval_label):
     st.info(f"⚠️ **數據限制**：本應用程式僅提供 **{selected_interval_label}** 數據，Yahoo Finance 通常僅提供**過去約 60 天**的歷史數據。")
         
     try:
-        # 增加延遲，提高 API 請求穩定性
         time.sleep(1) 
         
         data = yf.download(
@@ -89,19 +88,30 @@ data_df = load_data(ticker_symbol, start_date, end_date, interval, selected_inte
 if not data_df.empty:
     st.subheader(f"📈 {ticker_symbol} 價格走勢圖 - {selected_interval_label} (含 20 期 SMA)")
 
-    # --- Plotly 繪圖前的數據標準化 (最終穩定修正，避免 KeyError) ---
+    # --- Plotly 繪圖前的數據標準化 (最終極修正) ---
     df_plot = data_df.reset_index() 
     
-    # 1. 確定第一個欄位的名稱
-    date_col_name = df_plot.columns[0]
+    # 1. 確保日期欄位的名稱是 'Datetime'
+    # 找出當前數據框中，除了 OHLCV/SMA_20 以外的唯一欄位（即日期/時間）
+    known_cols = ['Open', 'High', 'Low', 'Close', 'Volume', 'SMA_20']
     
-    # 2. **關鍵修正**：只將日期欄位重命名，使用 'Close' 原始名稱
-    df_plot = df_plot.rename(columns={date_col_name: 'Datetime'})
+    # 找出日期欄位的實際名稱
+    datetime_col_candidates = [col for col in df_plot.columns if col not in known_cols]
     
-    # 3. 移除包含 NaN 值的行 (現在檢查 ['Close', 'Datetime'])
+    if len(datetime_col_candidates) == 1:
+        date_col_name = datetime_col_candidates[0]
+        # 關鍵修正：將實際的日期欄位重命名為 'Datetime'
+        df_plot = df_plot.rename(columns={date_col_name: 'Datetime'})
+    else:
+        # 如果找不到日期欄位，或者找到多個欄位 (不該發生)
+        st.error(f"🚫 數據欄位結構異常，無法識別日期欄位。找到的欄位: {df_plot.columns.tolist()}")
+        st.stop()
+    
+    # 2. 移除包含 NaN 值的行 (現在檢查 ['Close', 'Datetime'])
+    # 這是發生錯誤的行，但現在欄位名稱已經被保證
     df_plot = df_plot.dropna(subset=['Close', 'Datetime'])
     
-    # 4. 最終檢查：防止數據清洗後為空
+    # 3. 最終檢查：防止數據清洗後為空
     if df_plot.empty:
         st.error("🚫 **錯誤**：數據經過清洗後已無有效數據點。請檢查日期範圍是否包含交易日。")
         st.stop()
@@ -122,7 +132,7 @@ if not data_df.empty:
         y='Value',             
         color='Series',        
         line_dash='Series',    
-        color_discrete_map={'Close': 'blue', 'SMA_20': 'red'}, # 顏色對應 'Close'
+        color_discrete_map={'Close': 'blue', 'SMA_20': 'red'}, 
         title=f'{ticker_symbol} 價格與 20 期 SMA 走勢圖',
         template='plotly_white'
     )
