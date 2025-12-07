@@ -2,77 +2,169 @@ import streamlit as st
 import yfinance as yf
 import pandas as pd
 import datetime
-# import matplotlib.pyplot as plt # 由於未使用，移除此 import 保持程式碼簡潔
+import plotly.express as px # 建議使用 Plotly 繪圖，因為它比 Streamlit 內建的 line_chart 更適合時序數據
+import time 
 
 # --- 網頁設定 ---
 st.set_page_config(
-    page_title="布蘭特原油走勢儀表板",
+    page_title="多時間框架金融數據分析儀表板",
     layout="wide"
 )
 
 # --- 標題 ---
-# 這裡將標題更新為包含時間間隔的描述
-st.title("⛽ 布蘭特原油 (Brent Oil) 歷史走勢分析 (15 分鐘線)")
+st.title("⛽ 金融數據走勢分析儀表板")
 
 # -------------------------------------------------------------
-## ⚙️ 定義時間間隔參數 (硬編碼為 15m)
+## 🛠️ 數據抓取函式 (必須放在主程式邏輯調用前)
 # -------------------------------------------------------------
-interval = "15m"
-selected_interval_label = "15 分鐘線 (15m)"
+@st.cache_data(show_spinner="正在下載數據...")
+def load_data(ticker, start, end, interval, selected_interval_label):
+    
+    # 顯示數據限制警告 (根據間隔動態顯示)
+    if interval in ["1m", "5m"]:
+        st.info(f"⚠️ **高頻率數據限制**：選擇 **{selected_interval_label}** 時，Yahoo Finance 通常僅提供**過去約 7 個交易日**的數據。")
+    elif interval in ["15m", "30m", "1h"]:
+        st.info(f"⚠️ **中頻率數據限制**：選擇 **{selected_interval_label}** 時，Yahoo Finance 通常僅提供**過去約 60 天**的數據。")
+    elif interval == "1d":
+        st.info(f"✅ **低頻率數據**：日線數據歷史長度通常較長。")
+        
+    try:
+        # 增加延遲，提高 API 請求穩定性
+        time.sleep(1) 
+        
+        data = yf.download(
+            ticker, 
+            start=start.strftime('%Y-%m-%d'), 
+            end=end.strftime('%Y-%m-%d'), 
+            interval=interval
+        )
+        
+        # 關鍵錯誤檢查
+        if data.empty or 'Close' not in data.columns:
+             st.error(f"🚫 數據載入失敗或數據為空。請檢查您的代碼 '{ticker}'、日期範圍或時間間隔設定。")
+             st.cache_data.clear() 
+             return pd.DataFrame()
+             
+        return data
+        
+    except Exception as e:
+        st.error(f"抓取數據時發生錯誤: {e}")
+        st.cache_data.clear() 
+        return pd.DataFrame()
 
+# -------------------------------------------------------------
+## ⚙️ 輸入控制項與動態日期設定
+# -------------------------------------------------------------
 
-# --- 側邊欄輸入控制項 ---
 st.sidebar.header("設定選項")
 
-# 讓用戶選擇要分析的金融代碼 (預設為布蘭特原油期貨)
-ticker_symbol = st.sidebar.text_input("輸入金融代碼 (例如: BZ=F, ^GSPC)", "BZ=F")
+# 1. 輸入金融代碼
+ticker_symbol = st.sidebar.text_input("輸入金融代碼 (例如: BZ=F, ^GSPC, 2330.TW)", "BZ=F")
 
-# 讓用戶選擇日期範圍
+# 2. 選擇時間間隔 (動態間隔)
+interval_options = {
+    "1 分鐘線 (1m)": "1m",
+    "5 分鐘線 (5m)": "5m",
+    "15 分鐘線 (15m)": "15m",
+    "30 分鐘線 (30m)": "30m",
+    "1 小時線 (1h)": "1h",
+    "日線 (1d)": "1d"
+}
+selected_interval_label = st.sidebar.selectbox(
+    "選擇數據頻率 (時間間隔)",
+    list(interval_options.keys()),
+    index=5 # 預設為日線 (1d)
+)
+interval = interval_options[selected_interval_label]
+
+# 3. 自動調整日期範圍 (動態日期範圍)
 today = datetime.date.today()
-# 由於 15 分鐘線屬於日內數據，Yahoo Finance 通常只提供約 60 天的數據。
-# 我們將起始日期預設為近 60 天，以確保能抓到數據。
-safe_default_start_date = today - datetime.timedelta(days=60) 
-start_date = st.sidebar.date_input("起始日期 (建議在近 60 天內)", safe_default_start_date)
+
+# 根據時間間隔，設定建議的最大歷史天數
+MAX_DAYS_MAP = {
+    "1m": 7, "5m": 7,        # 1m/5m 僅約 7 天
+    "15m": 60, "30m": 60, "1h": 60, # 中頻率約 60 天
+    "1d": 5 * 365 # 日線給予 5 年預設
+}
+max_days = MAX_DAYS_MAP.get(interval, 5 * 365) 
+
+# 計算建議的預設起始日期
+safe_default_start_date = today - datetime.timedelta(days=max_days)
+min_selectable_date = today - datetime.timedelta(days=max_days + 1)
+
+if interval == "1d":
+    min_selectable_date = datetime.date(1980, 1, 1) # 日線可以拉到更早
+    
+start_date = st.sidebar.date_input(
+    "起始日期 (會依頻率自動調整預設值)",
+    value=safe_default_start_date, 
+    min_value=min_selectable_date 
+)
 end_date = st.sidebar.date_input("結束日期", today)
 
 
-# --- 數據抓取函式 (使用 Streamlit 的快取功能) ---
-@st.cache_data
-def load_data(ticker, start, end, interval):
-    """從 yfinance 下載數據並快取"""
-    try:
-        # 關鍵：將 interval 參數傳遞給 yf.download
-        data = yf.download(ticker, start=start, end=end, interval=interval)
-        if data.empty:
-             st.error(f"錯誤：無法獲取代碼 '{ticker}' 的數據，請檢查代碼是否正確或日期範圍是否有效。")
-             return pd.DataFrame() # 返回空 DataFrame
-        return data
-    except Exception as e:
-        st.error(f"抓取數據時發生錯誤: {e}")
-        return pd.DataFrame()
+# -------------------------------------------------------------
+## 📈 主程式邏輯與繪圖
+# -------------------------------------------------------------
 
-# --- 執行數據抓取 ---
-# 關鍵：將 interval 參數傳遞給 load_data 函數
-data_df = load_data(ticker_symbol, start_date, end_date, interval)
+data_df = load_data(ticker_symbol, start_date, end_date, interval, selected_interval_label)
 
-# --- 網頁主要內容展示 ---
+# 視覺化與呈現
 if not data_df.empty:
     st.subheader(f"📈 {ticker_symbol} 價格走勢圖 - {selected_interval_label} ({start_date} 至 {end_date})")
 
-    # 繪製收盤價折線圖 (使用 Streamlit 內建功能更簡潔)
-    st.line_chart(data_df['Close'])
+    # --- 繪圖前的數據標準化 (防止 KeyError) ---
+    df_plot = data_df.reset_index() 
     
-    st.subheader("📊 原始數據 (前 10 筆)")
-    st.dataframe(data_df.head(10))
+    # 1. 確保第一個欄位 (日期/時間) 被命名為 'Datetime'
+    date_col_name = df_plot.columns[0]
     
-    # 顯示統計摘要
-    st.subheader("📝 統計摘要")
-    st.write(data_df['Close'].describe())
+    # 2. 使用安全的 rename 方法，將欄位名稱標準化
+    col_mapping = {
+        date_col_name: 'Datetime',  
+        'Close': 'Price'            
+    }
+    df_plot = df_plot.rename(columns=col_mapping)
     
-    # 提示下載
+    # 3. 移除包含 NaN 值的行
+    df_plot = df_plot.dropna(subset=['Price', 'Datetime'])
+    
+    # 4. 最終檢查：防止數據清洗後為空
+    if df_plot.empty:
+        st.error("🚫 **錯誤**：數據經過清洗後已無有效數據點。請檢查日期範圍是否包含交易日。")
+        st.stop()
+    
+    # --- 使用 Plotly Express 繪製折線圖 (代替 Streamlit 內建功能) ---
+    fig = px.line(
+        df_plot,
+        x='Datetime',  # 使用標準化後的穩定名稱
+        y='Price',             
+        title=f'{ticker_symbol} 收盤價格走勢圖',
+        template='plotly_white'
+    )
+    
+    fig.update_yaxes(autorange=True, fixedrange=False) 
+    fig.update_xaxes(title_text=f"日期 / 時間 ({selected_interval_label})")
+
+    st.plotly_chart(fig, use_container_width=True)
+
+    # --- 數據表格與統計 ---
+    st.markdown("---")
+    
+    col1, col2 = st.columns(2)
+
+    with col1:
+        st.subheader("📊 原始數據 (最新 10 筆)")
+        st.dataframe(data_df.tail(10).style.format(precision=2))
+    
+    with col2:
+        st.subheader("📝 統計摘要")
+        st.write(data_df['Close'].describe().to_frame().style.format(precision=2))
+        
+    # 下載按鈕
     csv_data = data_df.to_csv().encode('utf-8')
     st.download_button(
-        label="下載數據為 CSV",
+        label=f"📥 下載 {ticker_symbol} ({selected_interval_label}) 數據為 CSV",
         data=csv_data,
         file_name=f'{ticker_symbol}_history_{interval}.csv',
         mime='text/csv',
