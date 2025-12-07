@@ -69,7 +69,6 @@ def load_data(ticker, start, end, interval, selected_interval_label):
         st.info(f"⚠️ **小時線數據限制**：選擇 **{selected_interval_label}** 時，Yahoo Finance 通常僅提供**過去約 60 天**的數據。")
         
     try:
-        # 新增延遲
         time.sleep(1) 
         
         data = yf.download(
@@ -79,7 +78,6 @@ def load_data(ticker, start, end, interval, selected_interval_label):
             interval=interval
         )
         
-        # 關鍵錯誤檢查：數據為空或缺少欄位
         if data.empty or 'Close' not in data.columns:
              st.error(f"🚫 數據載入失敗或數據為空。請檢查您的代碼 '{ticker}'、日期範圍或時間間隔設定。")
              st.cache_data.clear() 
@@ -99,14 +97,23 @@ data_df = load_data(ticker_symbol, start_date, end_date, interval, selected_inte
 if not data_df.empty:
     st.subheader(f"📈 {ticker_symbol} 價格走勢圖 ({selected_interval_label})")
 
-    # --- 使用 Plotly Express 繪製圖表 ---
+    # --- Plotly 繪圖前的數據標準化 (關鍵修正點) ---
     df_plot = data_df.reset_index() 
     
-    # 最終修正：使用欄位索引 [0] 確保 X 軸是第一個欄位 (日期/時間)
+    # 確保欄位名稱穩定，避免 Plotly 錯誤：將第一個欄位 (日期) 命名為 Datetime
+    df_plot.columns.values[0] = 'Datetime'
+    
+    # 將 Close 欄位名稱標準化為 Price
+    df_plot = df_plot.rename(columns={'Close': 'Price'})
+    
+    # 移除包含 NaN 值的行，增強穩定性
+    df_plot = df_plot.dropna(subset=['Price', 'Datetime'])
+    
+    # --- 使用 Plotly Express 繪製圖表 ---
     fig = px.line(
         df_plot,
-        x=df_plot.columns[0],  # 使用索引 [0] 確保穩定性
-        y='Close',             
+        x='Datetime',  # 使用標準化後的穩定名稱
+        y='Price',             
         title=f'{ticker_symbol} 收盤價格走勢圖',
         template='plotly_white'
     )
@@ -123,6 +130,7 @@ if not data_df.empty:
 
     with col1:
         st.subheader("📊 原始數據 (最新 10 筆)")
+        # 這裡仍使用原始 data_df 的 Close 欄位進行展示
         st.dataframe(data_df.tail(10).style.format(precision=2))
     
     with col2:
