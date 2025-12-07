@@ -3,7 +3,7 @@ import yfinance as yf
 import pandas as pd
 import datetime
 import plotly.express as px 
-import time # 新增 time 函式庫用於穩定 API 請求
+import time 
 
 # --- 網頁設定 ---
 st.set_page_config(
@@ -17,10 +17,8 @@ st.title("💰 金融數據走勢分析儀表板 (yfinance & Streamlit)")
 # --- 側邊欄輸入控制項 ---
 st.sidebar.header("設定選項")
 
-# 1. 輸入金融代碼
 ticker_symbol = st.sidebar.text_input("輸入金融代碼 (例如: BZ=F, ^GSPC, 2330.TW)", "BZ=F")
 
-# 2. 選擇時間間隔
 interval_options = {
     "日線 (1d)": "1d",
     "小時線 (1h)": "1h",
@@ -71,7 +69,7 @@ def load_data(ticker, start, end, interval, selected_interval_label):
         st.info(f"⚠️ **小時線數據限制**：選擇 **{selected_interval_label}** 時，Yahoo Finance 通常僅提供**過去約 60 天**的數據。")
         
     try:
-        # 新增延遲，提高 API 請求穩定性
+        # 新增延遲
         time.sleep(1) 
         
         data = yf.download(
@@ -87,7 +85,6 @@ def load_data(ticker, start, end, interval, selected_interval_label):
              st.cache_data.clear() 
              return pd.DataFrame()
              
-        # 數據結構良好，直接返回
         return data
         
     except Exception as e:
@@ -103,18 +100,17 @@ if not data_df.empty:
     st.subheader(f"📈 {ticker_symbol} 價格走勢圖 ({selected_interval_label})")
 
     # --- 使用 Plotly Express 繪製圖表 ---
-    # 將日期索引重設為欄位，默認名稱為 'Date'
     df_plot = data_df.reset_index() 
     
+    # 最終修正：使用欄位索引 [0] 確保 X 軸是第一個欄位 (日期/時間)
     fig = px.line(
         df_plot,
-        x='Date',  # 直接使用 'Date' 欄位名稱，提高 Plotly 穩定性
+        x=df_plot.columns[0],  # 使用索引 [0] 確保穩定性
         y='Close',             
         title=f'{ticker_symbol} 收盤價格走勢圖',
         template='plotly_white'
     )
     
-    # 確保 Y 軸自動縮放並允許互動
     fig.update_yaxes(autorange=True, fixedrange=False) 
     fig.update_xaxes(title_text=f"日期 / 時間 ({selected_interval_label})")
 
