@@ -123,7 +123,7 @@ if not data_df.empty:
         st.stop()
     # 
 
-[Image of a stock market chart showing price movement over time]
+#[Image of a stock market chart showing price movement over time]
 
 
     # --- 使用 Plotly Express 繪製圖表 ---
