@@ -129,7 +129,7 @@ if not data_df.empty:
 
     # 
 
-[Image of a stock price candlestick chart showing different time intervals]
+#[Image of a stock price candlestick chart showing different time intervals]
 
 
     # --- 使用 Plotly Express 繪製圖表 ---
